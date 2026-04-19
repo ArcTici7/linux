@@ -19,8 +19,7 @@ jobs:
           sudo apt update
           sudo apt install -y git build-essential bc flex bison \
             libssl-dev libelf-dev device-tree-compiler \
-            gcc-aarch64-linux-gnu cpio python3-pip
-          pip3 install mkbootimg
+            gcc-aarch64-linux-gnu cpio abootimg
 
       - name: Configure kernel (sm7125.config)
         working-directory: kernel
@@ -38,7 +37,7 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- dtbs
           mkdir -p ../output
 
-      - name: Combine kernel with joyeuse device tree
+      - name: Combine kernel with joyeuse device tree and create boot.img
         run: |
           # Find the correct DTB for joyeuse (Huaxing panel)
           DTB=$(find kernel/arch/arm64/boot/dts/qcom -name "*joyeuse*.dtb" | head -1)
@@ -49,7 +48,7 @@ jobs:
           echo "Using DTB: $DTB"
           # Combine kernel and DTB
           cat kernel/arch/arm64/boot/Image $DTB > Image-dtb
-          # Create minimal initramfs (just a shell)
+          # Create minimal initramfs
           mkdir -p initramfs
           cd initramfs
           cat > init << 'EOF'
@@ -62,16 +61,18 @@ jobs:
           chmod +x init
           find . | cpio -o -H newc | gzip > ../initrd.gz
           cd ..
-          # Create boot.img using mkbootimg (offsets from typical ARM64)
-          mkbootimg --kernel Image-dtb \
-                    --ramdisk initrd.gz \
-                    --base 0x00000000 \
-                    --pagesize 4096 \
-                    --kernel_offset 0x00008000 \
-                    --ramdisk_offset 0x01000000 \
-                    --tags_offset 0x00000100 \
-                    --cmdline "console=tty0 quiet" \
-                    -o boot.img
+          # Create boot image with abootimg (using typical ARM64 offsets)
+          cat > bootimg.cfg << EOF
+          bootsize = 0x4000000
+          pagesize = 0x1000
+          kerneladdr = 0x8000
+          ramdiskaddr = 0x1000000
+          secondaddr = 0xf00000
+          tagsaddr = 0x100
+          name = 
+          cmdline = console=tty0 quiet
+          EOF
+          abootimg --create boot.img -f bootimg.cfg -k Image-dtb -r initrd.gz
           cp boot.img output/
 
       - name: Upload boot image
